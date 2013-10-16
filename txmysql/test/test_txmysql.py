@@ -438,6 +438,21 @@ INSERT INTO `users` (`id`,`user`,`credit`,`class`,`first_usage`,`last_usage`,`en
         ]])
         conn.disconnect()
 
+    @defer.inlineCallbacks
+    def test_1020_decimal_fields(self):
+        """
+        Type and value for separate date/time types
+        """
+        import decimal
+        yield self._start_mysql()
+        conn = self._connect_mysql(retry_on_error=True)
+        yield conn.selectDb("foo")
+        result = yield conn.runQuery("select 123, 12345678901234567890, 1234567890123456789012345678901234567890, 123.456, 123.456e2")
+        rtypes = [[type(r) for r in result[0]]]
+        self.assertEquals(rtypes, [[ int, long, decimal.Decimal, decimal.Decimal,float ]])
+        self.assertEquals(result, [[ 123, 12345678901234567890, 1234567890123456789012345678901234567890, decimal.Decimal('123.456'),12345.6 ]])
+        conn.disconnect()
+
     # Utility functions:
 
     def _stop_mysql(self):

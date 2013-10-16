@@ -10,6 +10,7 @@ from hashlib import sha1
 import sys
 #import pprint
 import datetime
+import decimal
 
 typemap = {
     0x01: 1,
@@ -185,7 +186,7 @@ class MySQLProtocol(MultiBufferer, TimeoutMixin):
                                 print "exception follows, returning None to application",
                                 print e
                                 val = None
-                        if type in (0x0b,):
+                        elif type in (0x0b,):
                             try:
                                 nn,dd,hh,mm,ss,ms = 0,0,0,0,0,0
                                 if not val:
@@ -201,6 +202,8 @@ class MySQLProtocol(MultiBufferer, TimeoutMixin):
                                 print "exception follows, returning None to application",
                                 print e
                                 val = None
+                        elif type in (0x00, 0xf6,):
+                            val = decimal.Decimal(val)
                         cols.append(val)
                     nulls >>= 1
                 ret['cols'] = cols
