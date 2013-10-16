@@ -255,7 +255,7 @@ class MySQLClientTest(unittest.TestCase):
             self.assertTrue(isinstance(e, ConnectionDone))
         finally:
             conn.disconnect()
-        
+
     @defer.inlineCallbacks
     def test_0500_retry_on_error(self):
         """
@@ -381,6 +381,44 @@ class MySQLClientTest(unittest.TestCase):
         yield conn.runQuery("select id from mailaliases where username='iceshaman@gmail.com' and deletedate is null")
         conn.disconnect()
     FREEBSD_TESTS.append(test_0900_autoRepairKeyError.__name__)
+
+    @defer.inlineCallbacks
+    def test_1000_mediumint_fix_issue_3(self):
+        """
+        See https://github.com/hybridlogic/txMySQL/issues/3
+        """
+        yield self._start_mysql()
+        conn = self._connect_mysql(retry_on_error=True)
+        yield conn.selectDb("foo")
+        yield conn.runOperation("create database if not exists foo")
+        yield conn.runOperation("drop table if exists users")
+        yield conn.runOperation("""
+CREATE TABLE `users` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `user` varchar(30) NOT NULL DEFAULT '',
+  `credit` mediumint(8) unsigned NOT NULL DEFAULT '0',
+  `class` tinyint(2) unsigned NOT NULL DEFAULT '0',
+  `first_usage` int(10) unsigned NOT NULL DEFAULT '0',
+  `last_usage` int(10) unsigned NOT NULL DEFAULT '0',
+  `enabled` tinyint(1) unsigned NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `idx_uc` (`user`)
+) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8
+        """)
+        yield conn.runOperation("""
+INSERT INTO `users` (`id`,`user`,`credit`,`class`,`first_usage`,`last_usage`,`enabled`) VALUES (1,'foo',1000000,10,1312417862,0,0)
+        """)
+        result = yield conn.runQuery("SELECT id, user, credit, class, first_usage, last_usage, enabled FROM users")
+        self.assertEquals(result, [[1,'foo',1000000,10,1312417862,0,0]])
+        result = yield conn.runQuery("SELECT id, user, credit, first_usage, last_usage, enabled FROM users")
+        self.assertEquals(result, [[1,'foo',1000000,1312417862,0,0]])
+        result = yield conn.runQuery("SELECT first_usage, last_usage, enabled FROM users")
+        self.assertEquals(result, [[1312417862,0,0]])
+        result = yield conn.runQuery("SELECT credit, class FROM users")
+        self.assertEquals(result, [[1000000,10]])
+        result = yield conn.runQuery("SELECT class, credit FROM users")
+        self.assertEquals(result, [[10,1000000]])
+        conn.disconnect()
 
     # Utility functions:
 

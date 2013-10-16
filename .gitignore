@@ -22,3 +22,5 @@ dist
 *.tmp
 *~
 #\#*
+secrets.py
+_trial_temp
