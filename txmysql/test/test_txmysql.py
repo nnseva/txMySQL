@@ -420,6 +420,24 @@ INSERT INTO `users` (`id`,`user`,`credit`,`class`,`first_usage`,`last_usage`,`en
         self.assertEquals(result, [[10,1000000]])
         conn.disconnect()
 
+    @defer.inlineCallbacks
+    def test_1010_datetime_fields(self):
+        """
+        Type and value for separate date/time types
+        """
+        import datetime
+        yield self._start_mysql()
+        conn = self._connect_mysql(retry_on_error=True)
+        yield conn.selectDb("foo")
+        result = yield conn.runQuery("SELECT DATE('0001-02-03'), TIME('04:05:06'), TIMESTAMP('0001-02-03 04:05:06'), CONVERT('0001-02-03 04:05:06',DATETIME)")
+        self.assertEquals(result, [[
+                datetime.date(1,2,3),
+                datetime.datetime(1,2,3,4,5,6)-datetime.datetime(1,2,3,0,0,0),
+                datetime.datetime(1,2,3,4,5,6),
+                datetime.datetime(1,2,3,4,5,6)
+        ]])
+        conn.disconnect()
+
     # Utility functions:
 
     def _stop_mysql(self):
