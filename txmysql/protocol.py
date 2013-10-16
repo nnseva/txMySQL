@@ -19,7 +19,7 @@ typemap = {
     0x05: 8,
     0x08: 8,
     0x09: 4,
-    0x0c: 8
+    #0x0c: 8
 }
 
 def _xor(message1, message2):
@@ -164,20 +164,44 @@ class MySQLProtocol(MultiBufferer, TimeoutMixin):
                             val, = struct.unpack('<f', val)
                         elif type == 5:
                             val, = struct.unpack('<d', val)
-                        elif type == 12:
+                        else:
+                            val = util.unpack_little_endian(val)
+                        cols.append(val)
+                    else:
+                        val = yield t.read_lcs()
+                        if type in (0x07, 0x0a, 0x0c, 0x0e):
                             try:
-                                val = datetime.datetime(*struct.unpack("<xHBBBBB",val)).strftime('%Y-%m-%d %H:%M:%S')
+                                if not val:
+                                    val = datetime.datetime.utcfromtimestamp(0) # 'zero-value'
+                                elif len(val) == 4:
+                                    val = datetime.date(*struct.unpack("<HBB",val))
+                                elif len(val) == 7:
+                                    val = datetime.datetime(*struct.unpack("<HBBBBB",val))
+                                else:
+                                    val = datetime.datetime(*struct.unpack("<HBBBBBI",val))
                             except Exception, e:
                                 print "CRITICAL: Caught exception in txmysql when trying",
                                 print "to decode datetime value %r" % (val,),
                                 print "exception follows, returning None to application",
                                 print e
                                 val = None
-                        else:
-                            val = util.unpack_little_endian(val)
+                        if type in (0x0b,):
+                            try:
+                                nn,dd,hh,mm,ss,ms = 0,0,0,0,0,0
+                                if not val:
+                                    pass
+                                elif len(val) == 8:
+                                    nn,dd,hh,mm,ss = struct.unpack("<BIBBB",val)
+                                else:
+                                    nn,dd,hh,mm,ss,ms = struct.unpack("<BIBBBI",val)
+                                val = datetime.timedelta(dd,hh*3600+mm*60+ss+ms/1000.)*(-1 if nn else 1)
+                            except Exception, e:
+                                print "CRITICAL: Caught exception in txmysql when trying",
+                                print "to decode time value %r" % (val,),
+                                print "exception follows, returning None to application",
+                                print e
+                                val = None
                         cols.append(val)
-                    else:
-                        cols.append((yield t.read_lcs()))
                     nulls >>= 1
                 ret['cols'] = cols
                 ret['x'] = yield t.read_rest()
