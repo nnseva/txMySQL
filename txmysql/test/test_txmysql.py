@@ -453,6 +453,63 @@ INSERT INTO `users` (`id`,`user`,`credit`,`class`,`first_usage`,`last_usage`,`en
         self.assertEquals(result, [[ 123, 12345678901234567890, 1234567890123456789012345678901234567890, decimal.Decimal('123.456'),12345.6 ]])
         conn.disconnect()
 
+    @defer.inlineCallbacks
+    def test_1030_speed_comparison(self):
+        yield self._start_mysql()
+        conn = self._connect_mysql(retry_on_error=True)
+        yield conn.runOperation("drop table if exists speed_test")
+        yield conn.runOperation("create table speed_test (id int not null primary key,val text)")
+
+        import datetime
+
+        dlist = []
+        t1 = datetime.datetime.now()
+        for i in range(1000):
+            s = 'Its the test %s' % i
+            dlist.append(conn.runOperation("insert into speed_test(id,val) values (%s,%s)", [i,s]))
+        yield defer.DeferredList(dlist)
+        t2 = datetime.datetime.now()
+        tx_insert_time = t2 - t1
+
+        dlist = []
+        t1 = datetime.datetime.now()
+        for i in range(1000):
+            dlist.append(conn.runQuery("select * from speed_test where id=%s", [i]))
+        yield defer.DeferredList(dlist)
+        t2 = datetime.datetime.now()
+        tx_select_time = t2 - t1
+
+        yield conn.runOperation("truncate speed_test")
+
+        from MySQLdb import connect
+        mconn = connect(host='127.0.0.1', user='root', passwd=secrets.MYSQL_ROOT_PASS,db='foo')
+        cursor = mconn.cursor()
+
+        t1 = datetime.datetime.now()
+        for i in range(1000):
+            s = 'Its the test %s' % i
+            cursor.execute("insert into speed_test(id,val) values (%s,%s)", [i,s])
+        t2 = datetime.datetime.now()
+        m_insert_time = t2 - t1
+
+        r = []
+        t1 = datetime.datetime.now()
+        for i in range(1000):
+            cursor.close()
+            cursor = mconn.cursor()
+            cursor.execute("select * from speed_test where id=%s", [i])
+            r.append(cursor.fetchall())
+        t2 = datetime.datetime.now()
+        m_select_time = t2 - t1
+
+        print "TX vs Native: insert",tx_insert_time,'vs',m_insert_time
+        print "TX vs Native: select",tx_select_time,'vs',m_select_time
+
+        cursor.close()
+        mconn.close()
+
+        conn.disconnect()
+
     # Utility functions:
 
     def _stop_mysql(self):

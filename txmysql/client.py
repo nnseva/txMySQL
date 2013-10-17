@@ -158,7 +158,8 @@ class MySQLConnection(ReconnectingClientFactory):
         # Store a reference to the current operation (there's gonna be only one running at a time)
         self._current_operation_dfr = operation_dfr
 
-        operation_dfr.addBoth(self._doneQuery)
+        #operation_dfr.addBoth(self._doneQuery)
+        operation_dfr.addCallback(self._successQuery).addErrback(self._errorQuery)
 
         # Jump back into the game when that operation completes (done_query_error returns none
         # so the callback, not errback gets called)
@@ -224,6 +225,78 @@ class MySQLConnection(ReconnectingClientFactory):
                 if self.pool:
                     self.pool._doneQuery(self)
             self._current_user_dfr = None
+        else:
+            print "CRITICAL WARNING! Current user deferred was None when a query fired back with %s - there should always be a user deferred to fire the response to..." % data
+            raise Exception("txMySQL internal inconsistency")
+        self._error_condition = False
+        self._current_operation = None
+        self._current_operation_dfr = None
+        # If that was a failure, the buck stops here, returning None instead of the failure stops it propogating
+
+    @defer.inlineCallbacks
+    def _successQuery(self, data):
+        # The query success deferred has fired
+        if self._current_user_dfr:
+                if DEBUG:
+                    print "Query is done with result %s, firing back on %s" % (data, self._current_user_dfr)
+                self._current_user_dfr.callback(data)
+                if self.pool:
+                    self.pool._doneQuery(self)
+                self._current_user_dfr = None
+        else:
+            print "CRITICAL WARNING! Current user deferred was None when a query fired back with %s - there should always be a user deferred to fire the response to..." % data
+            raise Exception("txMySQL internal inconsistency")
+        self._error_condition = False
+        self._current_operation = None
+        self._current_operation_dfr = None
+        yield
+        # If that was a failure, the buck stops here, returning None instead of the failure stops it propogating
+
+    @defer.inlineCallbacks
+    def _errorQuery(self, data):
+        # The query error deferred has fired
+        if self._current_user_dfr:
+                if data.check(error.MySQLError):
+                    if data.value.args[0] in self.temporary_error_strings:
+                        print "CRITICAL: Caught '%s', reconnecting and retrying" % (data.value.args[0])
+                        self.client.transport.loseConnection()
+                        return
+                    """
+                    Incorrect key file for table './autorepair/mailaliases.MYI'; try to repair it", 126, 'HY000'
+                    Table './hybridcluster/filesystem_modification_counts' is marked as crashed and last (automatic?) repair failed", 144, 'HY000'
+                    """
+                    error_string = data.value.args[0]
+                    keyCorruptionPrefix = 'Incorrect key file for table \'./'
+                    start = None
+                    if error_string.startswith(keyCorruptionPrefix) and self._autoRepair:
+                        start = len(keyCorruptionPrefix)
+                    elif "is marked as crashed and last (automatic?) repair failed" in error_string and self._autoRepair:
+                        start = len("Table \'./")
+                    if start:
+                        dbfile = error_string[start:error_string.find("'", start)]
+                        table = dbfile.rsplit('/', 1)[1].rsplit('.', 1)[0]
+                        repair = "repair table " + table
+                        log.msg(
+                            channel="autorepair",
+                            msgs=[error_string, "\n\tabout to repair", repr(repair)])
+                        result = yield self.client.query(repair)
+                        log.msg(
+                            channel="autorepair",
+                            msgs=["repair completed", repr(result)])
+                        self._executeCurrentOperation()
+                        return
+
+                    if data.value.args[0] in self.temporary_error_strings:
+                        print "CRITICAL: Caught '%s', reconnecting and retrying" % (data.value.args[0])
+                        self.client.transport.loseConnection()
+                        return
+                if DEBUG:
+                    print "Query failed with error %s, errback firing back on %s" % (data, self._current_user_dfr)
+                # XXX: If this an errback due to MySQL closing the connection,
+                # and we are retry_on_true, and so we have set
+                # _error_condition,  shouldn't we mask the failure?
+                self._current_user_dfr.errback(data)
+                self._current_user_dfr = None
         else:
             print "CRITICAL WARNING! Current user deferred was None when a query fired back with %s - there should always be a user deferred to fire the response to..." % data
             raise Exception("txMySQL internal inconsistency")
